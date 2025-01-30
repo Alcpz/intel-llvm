@@ -56,7 +56,7 @@ using complex_type = detail::complex_namespace::complex<ValueT>;
 
 template <typename T>
 constexpr bool is_int32_type = std::is_same_v<std::decay_t<T>, int32_t> ||
-  std::is_same_v<std::decay_t<T>, uint32_t>;
+                               std::is_same_v<std::decay_t<T>, uint32_t>;
 
 // Helper constexpr bool to avoid ugly macros where possible
 #ifdef SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS
@@ -89,10 +89,12 @@ inline std::enable_if_t<std::is_same_v<T, sycl::ext::oneapi::bfloat16>,
                         sycl::vec<T, Size>>
 clamp(sycl::vec<T, Size> val, sycl::vec<T, Size> min_val,
       sycl::vec<T, Size> max_val) {
-  return [&val, &min_val, &max_val]<int... I>(std::integer_sequence<int, I...>) {
+  return
+      [&val, &min_val, &max_val ]<int... I>(std::integer_sequence<int, I...>) {
     return sycl::vec<T, Size>{
         clamp<sycl::ext::oneapi::bfloat16>(val[I], min_val[I], max_val[I])...};
-  }(std::make_integer_sequence<int, Size>{});
+  }
+  (std::make_integer_sequence<int, Size>{});
 }
 
 template <typename T, std::size_t Size>
@@ -100,10 +102,12 @@ inline std::enable_if_t<std::is_same_v<T, sycl::ext::oneapi::bfloat16>,
                         sycl::marray<T, Size>>
 clamp(sycl::marray<T, Size> val, sycl::marray<T, Size> min_val,
       sycl::marray<T, Size> max_val) {
-  return [&val, &min_val, &max_val]<std::size_t... I>(std::index_sequence<I...>) {
+  return
+      [&val, &min_val, &max_val ]<std::size_t... I>(std::index_sequence<I...>) {
     return sycl::marray<T, Size>{
         clamp<sycl::ext::oneapi::bfloat16>(val[I], min_val[I], max_val[I])...};
-  }(std::make_index_sequence<Size>{});
+  }
+  (std::make_index_sequence<Size>{});
 }
 #endif
 
@@ -836,7 +840,7 @@ inline std::common_type_t<ValueT, ValueU> fmin_nan(const ValueT a,
                                                    const ValueU b) {
   if (detail::isnan(a) || detail::isnan(b))
     return NAN;
-  return syclcompat::min(a,b);
+  return syclcompat::min(a, b);
 }
 
 template <typename ValueT, typename ValueU>
@@ -1250,6 +1254,22 @@ inline dot_product_acc_t<T1, T2> dp2a_hi(T1 a, T2 b,
 #endif
 }
 
+namespace detail {
+
+SYCL_EXTERNAL extern "C" int __builtin_IB_dp4a_ss(int c, int a, int b)
+    __attribute__((const));
+SYCL_EXTERNAL extern "C" int __builtin_IB_dp4a_us(int c, int a, int b)
+    __attribute__((const));
+SYCL_EXTERNAL extern "C" int __builtin_IB_dp4a_su(int c, int a, int b)
+    __attribute__((const));
+SYCL_EXTERNAL extern "C" int __builtin_IB_dp4a_uu(int c, int a, int b)
+    __attribute__((const));
+
+} // namespace detail
+
+#undef SYCL_DEVICE_BUILTIN
+#undef INVALID_PATH
+
 /// Four-way byte dot product-accumulate. Calculate and return integer_vector4(
 /// \param a) dot product integer_vector4( \param b)  + \param c
 ///
@@ -1283,6 +1303,18 @@ inline dot_product_acc_t<T1, T2> dp4a(T1 a, T2 b, dot_product_acc_t<T1, T2> c) {
     asm volatile("dp4a.u32.u32 %0, %1, %2, %3;"
                  : "=r"(res)
                  : "r"(a), "r"(b), "r"(c));
+  }
+  return res;
+#elif defined(__SYCL_DEVICE_ONLY__)
+  dot_product_acc_t<T1, T2> res;
+  if constexpr (std::is_signed_v<T1> && std::is_signed_v<T2>) {
+    res = detail::__builtin_IB_dp4a_ss(c, a, b);
+  } else if constexpr (std::is_signed_v<T1> && std::is_unsigned_v<T2>) {
+    res = detail::__builtin_IB_dp4a_su(c, a, b);
+  } else if constexpr (std::is_unsigned_v<T1> && std::is_signed_v<T2>) {
+    res = detail::__builtin_IB_dp4a_us(c, a, b);
+  } else {
+    res = detail::__builtin_IB_dp4a_uu(c, a, b);
   }
   return res;
 #else
